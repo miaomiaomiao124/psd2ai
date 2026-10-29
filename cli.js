@@ -43,6 +43,7 @@ PSD2AI v${packageJson.version}
   output/
   ├── README.md              # AI 使用说明
   ├── layout.json            # 布局数据
+  ├── parts.json             # 扁平部件清单（每个叶子图层一条记录）
   ├── preview.png            # 完整预览图
   ├── layer_*.png            # 原始图层
   ├── hidden/                # 隐藏图层（--include-hidden 时）

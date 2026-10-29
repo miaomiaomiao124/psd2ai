@@ -286,6 +286,35 @@ function countLayers(layers) {
 }
 
 /**
+ * 生成扁平部件清单：每个叶子图层一条记录，带组路径
+ * 便于脚本和下游工具（如 Live2D 部件整理）直接消费
+ */
+function flattenParts(layers, groupPath = []) {
+  const parts = [];
+  for (const layer of layers) {
+    const path = layer.type === 'group' ? [...groupPath, layer.name] : groupPath;
+    if (layer.children && layer.children.length > 0) {
+      parts.push(...flattenParts(layer.children, path));
+    } else {
+      parts.push({
+        name: layer.name,
+        type: layer.type,
+        visible: layer.visible,
+        opacity: layer.opacity,
+        position: layer.position,
+        size: layer.size,
+        bounds: layer.bounds,
+        image: layer.image || null,
+        thumbnail: layer.thumbnail || null,
+        text: layer.text,
+        groupPath: path
+      });
+    }
+  }
+  return parts;
+}
+
+/**
  * 生成 README 文档
  */
 function generateReadme(jsonData) {
@@ -481,6 +510,11 @@ async function psdToJSON(psdPath, outputDir, options = {}) {
   const jsonPath = join(outputDir, 'layout.json');
   writeFileSync(jsonPath, JSON.stringify(jsonData, null, 2), 'utf-8');
   console.log(`JSON 已生成: ${jsonPath}`);
+
+  // 写入扁平部件清单
+  const partsPath = join(outputDir, 'parts.json');
+  writeFileSync(partsPath, JSON.stringify(flattenParts(layers), null, 2), 'utf-8');
+  console.log(`部件清单已生成: ${partsPath}`);
 
   // 生成 README
   const readme = generateReadme(jsonData);
