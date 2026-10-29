@@ -163,13 +163,16 @@ function extractLayerName(name) {
 /**
  * 提取图层信息为 JSON 对象
  */
-async function layerToJSON(node, outputDir, index, usedNames = new Map()) {
+async function layerToJSON(node, outputDir, index, usedNames = new Map(), options = {}, inheritedVisible = true) {
   if (!node || !node.layer) return null;
 
   const layer = node.layer;
 
-  // 如果图层不可见，直接跳过（包括其子图层）
-  if (!layer.visible) return null;
+  // 实际可见性 = 自身可见 && 全部祖先可见
+  const effectiveVisible = inheritedVisible && layer.visible;
+
+  // 默认跳过不可见图层（包括其子图层）；--include-hidden 时也导出，图片放 hidden/ 目录
+  if (!effectiveVisible && !options.includeHidden) return null;
 
   const left = layer.left;
   const top = layer.top;
@@ -179,7 +182,7 @@ async function layerToJSON(node, outputDir, index, usedNames = new Map()) {
   const layerData = {
     name: extractLayerName(layer.name),
     type: node.isGroup() ? 'group' : 'layer',
-    visible: layer.visible,
+    visible: effectiveVisible,
     opacity: layer.opacity / 255,
     position: { left, top },
     size: { width, height },
@@ -218,11 +221,16 @@ async function layerToJSON(node, outputDir, index, usedNames = new Map()) {
         usedNames.set(cleanName, 0);
       }
 
-      const imagePath = join(outputDir, imageName);
+      // 隐藏图层（含隐藏组内的）图片放 hidden/ 目录，缩略图放 hidden/thumb/
+      const hiddenDir = effectiveVisible ? '' : 'hidden';
+      const imagePath = join(outputDir, hiddenDir, imageName);
+      if (hiddenDir) {
+        mkdirSync(join(outputDir, hiddenDir), { recursive: true });
+      }
       // saveAsPng 是异步写入，必须 await，否则后续读取会拿到不完整的空文件
       await node.layer.image.saveAsPng(imagePath);
-      layerData.image = imageName;
-      layerData.thumbnail = `thumb/${imageName}`;
+      layerData.image = hiddenDir ? `${hiddenDir}/${imageName}` : imageName;
+      layerData.thumbnail = hiddenDir ? `hidden/thumb/${imageName}` : `thumb/${imageName}`;
 
       console.log(`  导出图层: ${layer.name} -> ${imageName}`);
     } catch (e) {
@@ -233,7 +241,7 @@ async function layerToJSON(node, outputDir, index, usedNames = new Map()) {
   // 处理子图层（组）
   if (node.children && node.children().length > 0) {
     const childrenPromises = node.children()
-      .map((child, i) => layerToJSON(child, outputDir, `${index}_${i}`, usedNames));
+      .map((child, i) => layerToJSON(child, outputDir, `${index}_${i}`, usedNames, options, effectiveVisible));
     const childrenResults = await Promise.all(childrenPromises);
     layerData.children = childrenResults.filter(data => data !== null);
 
@@ -390,7 +398,7 @@ ${name}/
 /**
  * 转换 PSD 为 JSON
  */
-async function psdToJSON(psdPath, outputDir) {
+async function psdToJSON(psdPath, outputDir, options = {}) {
   console.log(`读取 PSD 文件: ${psdPath}`);
 
   // 创建输出目录
@@ -417,7 +425,7 @@ async function psdToJSON(psdPath, outputDir) {
 
   // 提取图层信息
   const layerPromises = tree.children()
-    .map((node, i) => layerToJSON(node, outputDir, i, usedNames));
+    .map((node, i) => layerToJSON(node, outputDir, i, usedNames, options));
   const layerResults = await Promise.all(layerPromises);
   const layers = layerResults.filter(data => data !== null);
 
@@ -459,8 +467,9 @@ async function psdToJSON(psdPath, outputDir) {
 
   for (const layer of imageLayers) {
     const imagePath = join(outputDir, layer.image);
-    const thumbPath = join(thumbDir, layer.image);
+    const thumbPath = join(outputDir, layer.thumbnail);
     if (existsSync(imagePath)) {
+      mkdirSync(dirname(thumbPath), { recursive: true });
       thumbTasks.push(createThumbnail(imagePath, thumbPath));
     }
   }
@@ -483,8 +492,8 @@ async function psdToJSON(psdPath, outputDir) {
 }
 
 // 执行转换
-export async function convertPSD(psdFile, outputDir) {
-  return psdToJSON(psdFile, outputDir);
+export async function convertPSD(psdFile, outputDir, options = {}) {
+  return psdToJSON(psdFile, outputDir, options);
 }
 
 // 命令行直接调用
